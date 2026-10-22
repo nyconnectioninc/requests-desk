@@ -245,10 +245,14 @@ function saveUser_(me, b) {
   const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName(USERS_TAB);
   const v = sh.getDataRange().getValues();
   const row = [email, String(b.name || '').slice(0, 80), b.role === 'Admin' ? 'Admin' : 'Helper', b.active !== false];
+  let firstEmpty = -1;
   for (let i = 1; i < v.length; i++) {
     if (normEmail_(v[i][0]) === email) { sh.getRange(i + 1, 1, 1, 4).setValues([row]); return users_(me); }
+    if (firstEmpty < 0 && !String(v[i][0]).trim()) firstEmpty = i + 1;
   }
-  sh.appendRow(row.concat([new Date()]));
+  // The Active column has checkboxes down the sheet, so fill the first blank row instead of appending at the bottom.
+  const target = firstEmpty > 0 ? firstEmpty : sh.getLastRow() + 1;
+  sh.getRange(target, 1, 1, 5).setValues([row.concat([new Date()])]);
   return users_(me);
 }
 
