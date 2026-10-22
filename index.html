@@ -464,9 +464,8 @@ function renderNav(){
   $("nav-cats").innerHTML = TABS.map(t=>navItem(t.key,t.label,t.icon,t.color,(S.rows[t.key]||[]).filter(isOpen).length||"")).join("");
   const latest = Math.max(0,...TABS.map(t=>S.syncedAt[t.key]||0));
   $("side-foot").innerHTML = `<div class="nav-h" style="padding:0">Appearance</div>${themeSeg()}
-    <div><span class="dot" style="background:${S.loadErr?"var(--orange)":(latest?"var(--green)":"var(--faint)")}"></span>${S.loadErr?"Can't reach the sheet":(latest?"Synced with Google Sheet":"Loading…")}</div>
+    <div><span class="dot" style="background:${S.loadErr?"var(--orange)":(latest?"var(--green)":"var(--faint)")}"></span>${S.loadErr?"Can't reach the sheet":(latest?"Live":"Loading…")}</div>
     <div>Updated ${fmtAgo(latest)} · <button class="copy" data-act="refresh" style="padding:0">Refresh</button></div>
-    <div>Store supply orders are handled by another team and aren't shown here.</div>
     ${admin?`<a href="${SHEET_URL}" target="_blank" rel="noopener" style="color:var(--accent)">Open the Google Sheet</a>`:""}
     ${S.me?`<div class="who">Signed in as <b>${esc(S.me.name)}</b></div><button class="copy" data-act="signout" style="padding:0;text-align:left">Sign out</button>`:""}`;
 }
