@@ -402,7 +402,7 @@ function themeSeg(){ return `<div class="seg theme-seg" role="group" aria-label=
 applyTheme();
 
 /* ============ Data ============ */
-const S = { rows:{}, syncedAt:{}, view:"summary", seg:"open", q:"", sort:"old", open:null, sel:null, checked:new Set(), curList:[], noteDraft:null, selNext:null, noteFocus:false,
+const S = { rows:{}, syncedAt:{}, view:"summary", seg:"open", ctype:"all", q:"", sort:"old", open:null, sel:null, checked:new Set(), curList:[], noteDraft:null, selNext:null, noteFocus:false,
   token:null, me:null, users:null, loading:false, loadErr:null };
 
 function parseTs(s){ const m=String(s||"").match(/(\d+)\/(\d+)\/(\d+),?\s*(\d+):(\d+):(\d+)\s*(AM|PM)?/i); if(!m) return null;
@@ -567,6 +567,8 @@ function renderCategory(k){
   const segs=[["open","Open"],["working","In progress"],["done","Done"],["all","All"]];
   let list=(rows||[]).filter(r=>{ const st=state(r);
     if(S.seg==="open") return st==="open"; if(S.seg==="working") return st==="working"||st==="issue"; if(S.seg==="done") return st==="done"||st==="closed"; return true; });
+  const isStoreCard=r=>r.v("Card Type")==="Store Cards";
+  if(k==="cards" && S.ctype!=="all") list=list.filter(r=>S.ctype==="store"?isStoreCard(r):!isStoreCard(r));
   if(S.q){ const q=S.q.toLowerCase(); list=list.filter(r=>(t.title(r)+" "+t.sub(r)+" "+t.fields(r).map(f=>f[1]).join(" ")).toLowerCase().includes(q)); }
   list.sort((a,b)=> S.seg==="done"||S.sort==="new" ? b.ts-a.ts : a.ts-b.ts);
   const openN=(rows||[]).filter(isOpen).length;
@@ -574,6 +576,8 @@ function renderCategory(k){
     <button class="btn" data-act="sort">${S.sort==="old"?"Oldest first":"Newest first"}</button></div>`;
   h += sourceBanner();
   let body=''; body+=`<div class="toolbar"><div class="seg" role="group" aria-label="Filter">${segs.map(([v,l])=>`<button data-seg="${v}" aria-pressed="${S.seg===v}">${l}</button>`).join("")}</div>
+    ${k==="cards"&&rows?(()=>{const base=rows.filter(r=>{const st=state(r); return S.seg==="open"?st==="open":S.seg==="working"?(st==="working"||st==="issue"):S.seg==="done"?(st==="done"||st==="closed"):true;});
+      const nS=base.filter(isStoreCard).length; return `<div class="seg" role="group" aria-label="Card type">${[["all","All",base.length],["personal","Personal",base.length-nS],["store","Store",nS]].map(([v,l,c])=>`<button data-ctype="${v}" aria-pressed="${S.ctype===v}">${l} <span class="num" style="opacity:.55">${c}</span></button>`).join("")}</div>`;})():""}
     <label class="search">${svg("search")}<input id="q" type="search" placeholder="Search name, store, item…" value="${esc(S.q)}" autocomplete="off"></label></div>`;
   const shown=list.slice(0,300); S.curList=shown.map(r=>r.key);
   const desk=isDesk();
@@ -718,6 +722,7 @@ document.addEventListener("click", async (ev)=>{
   if(b.dataset.view){ S.view=b.dataset.view; S.q=""; S.seg="open"; S.sel=null; S.checked.clear(); try{history.replaceState(null,"","#"+S.view);}catch(e){} try{localStorage.setItem("rd.view",S.view);}catch(e){} render(); window.scrollTo(0,0); return; }
   if(b.dataset.themeSet){ THEME=b.dataset.themeSet; try{localStorage.setItem("rd.theme",THEME);}catch(e){} applyTheme(); render(); return; }
   if(b.dataset.seg){ S.seg=b.dataset.seg; render(); return; }
+  if(b.dataset.ctype){ S.ctype=b.dataset.ctype; S.checked.clear(); render(); return; }
   if(b.dataset.open){ isDesk()?selectRow(b.dataset.open):openSheet(b.dataset.open); return; }
   if(b.dataset.copy!==undefined){ const el=$("f"+b.dataset.copy); const lab=b.getAttribute("aria-label").replace("Copy ","").replace(/\s*\(\d+\)$/,""); const hid=el.querySelector("span[hidden]"); copyText(hid?hid.textContent:el.textContent,lab); return; }
   if(b.dataset.act==="sort"){ S.sort=S.sort==="old"?"new":"old"; render(); return; }
