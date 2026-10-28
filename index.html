@@ -421,7 +421,7 @@ function buildRows(tabKey, values){
     if(seen[key]) key+="-"+(++seen[key]); else seen[key]=1;
     const col=h=>{const j=H.indexOf(h); return j<0?"":String(raw[j]??"").trim();};
     const r={ key, tab:tabKey, ts, rawTs:String(raw[0]).trim(), rowNum:i+1, sheetStatus: si>=0?String(raw[si]||"").trim():"",
-      hb:col("Handled By"), ua:col("Updated At"), tn:col("Team Notes"),
+      hb:col("Handled By"), ua:col("Updated At"), tn:col("Team Notes"), repeatOf:col("Repeat Of"), repeatReason:col("Repeat Reason"),
       v:(h)=>{const j=H.indexOf(h); return j<0?"":String(raw[j]??"").trim();} };
     out.push(r);
   }
@@ -429,7 +429,9 @@ function buildRows(tabKey, values){
   const byId={};
   out.forEach(r=>{ const id=t.ident(r); (byId[id]=byId[id]||[]).push(r); });
   Object.values(byId).forEach(list=>{ list.sort((a,b)=>a.ts-b.ts); for(let k=1;k<list.length;k++){ if(list[k].ts-list[k-1].ts < 14*864e5) list[k].dupOf=list[k-1]; }});
-  out.forEach(r=>{ r.issues=t.checks(r); if(r.dupOf) r.issues.unshift(`Possible duplicate of the ${fmtDate(r.dupOf.ts)} request${r.dupOf.sheetStatus?` (already ${r.dupOf.sheetStatus})`:""}.`); });
+  out.forEach(r=>{ r.issues=t.checks(r);
+    if(r.repeatOf){ r.issues.unshift(`Repeat request${r.repeatReason&&r.repeatReason!=="Not given"?` (${r.repeatReason})`:""} — the original from ${r.repeatOf.replace(/,.*?(\(row)/,' $1')} is still open. Fill one, close the other.`); return; }
+    if(r.dupOf) r.issues.unshift(`Possible duplicate of the ${fmtDate(r.dupOf.ts)} request${r.dupOf.sheetStatus?` (already ${r.dupOf.sheetStatus})`:""}.`); });
   return out;
 }
 
@@ -475,6 +477,7 @@ function mobileChips(){
   return `<div class="m-only"><span class="nyc-logo" role="img" aria-label="NY Connection"></span>${themeSeg()}</div><div class="mchips">${items.map(([k,l,i,c,n])=>`<button data-view="${k}" ${S.view===k?'aria-current="page"':""}><span class="ico" style="background:${c}">${svg(i)}</span>${l}${n?` <span class="num" style="opacity:.7">${n}</span>`:""}</button>`).join("")}</div>`;
 }
 
+const repeatPill = r => r.repeatOf ? `<span class="pill p-warn" style="margin-left:8px;vertical-align:1px">Repeat${r.repeatReason&&r.repeatReason!=="Not given"?" · "+esc(r.repeatReason):""}</span>` : "";
 function ageText(r){ const d=ageDays(r); return d<=0?"Today":d===1?"1 day":d+" days"; }
 function rowHtml(r, showCat){
   if(isDesk()) return deskRow(r, showCat);
@@ -487,7 +490,7 @@ function rowHtml(r, showCat){
   else pill=`<span class="pill ${d>=CRIT_DAYS?"p-crit":d>=STALE_DAYS?"p-warn":"p-age"} num">${ageText(r)}</span>`;
   return `<button class="row" data-open="${r.key}">
     <span class="ico" style="background:${t.color}">${svg(t.icon)}</span>
-    <span class="row-main"><div class="row-t">${esc(t.title(r))}</div><div class="row-s">${showCat?esc(t.label)+" · ":""}${esc(t.sub(r))}</div></span>
+    <span class="row-main"><div class="row-t">${esc(t.title(r))}${repeatPill(r)}</div><div class="row-s">${showCat?esc(t.label)+" · ":""}${esc(t.sub(r))}</div></span>
     <span class="row-r">${r.issues.length&&isOpen(r)?'<span class="flagdot" title="Has something to check"></span>':""}${pill}<svg class="chev" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 1l6 6-6 6"/></svg></span></button>`;
 }
 
@@ -510,7 +513,7 @@ function deskRow(r, showCat){
   return `<div class="drow${showCat?" compact":""}${S.sel===r.key?" sel":""}" data-open="${r.key}" role="button" tabindex="-1">
     <span>${!showCat&&canBulk(r)?`<button class="cbox${chk?" on":""}" data-check="${r.key}" role="checkbox" aria-checked="${chk}" aria-label="Select ${esc(t.title(r))}">${chk?svg("check"):""}</button>`:""}</span>
     <span class="ico" style="background:${t.color}">${svg(t.icon)}</span>
-    <span class="row-main"><div class="row-t">${esc(t.title(r))}${r.issues.length&&isOpen(r)?'<span class="flagdot" title="Has something to check"></span>':""}</div><div class="row-s">${showCat?esc(t.label)+(sub?" · ":""):""}${esc(sub)}</div></span>
+    <span class="row-main"><div class="row-t">${esc(t.title(r))}${repeatPill(r)}${r.issues.length&&isOpen(r)?'<span class="flagdot" title="Has something to check"></span>':""}</div><div class="row-s">${showCat?esc(t.label)+(sub?" · ":""):""}${esc(sub)}</div></span>
     <span class="cell-store">${esc(store)}<small>${esc(sid)}</small></span>
     <span class="cell-date num">${fmtDate(r.ts)}</span>
     <span class="cell-st">${pillOf(r)}</span></div>`;

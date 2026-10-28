@@ -67,6 +67,9 @@ function doPost(e) {
     switch (body.action) {
       case 'requestCode': return json_(requestCode_(body.email));
       case 'verifyCode':  return json_(verifyCode_(body.email, body.code));
+      // Public, used by the request form before submit. Returns only a yes/no + date + status.
+      case 'checkRepeat': return json_(checkRepeat_(body));
+      case 'tagRepeat':   return json_(tagRepeat_(body));
     }
     const me = auth_(body.token);
     if (!me) return json_({ ok: false, error: 'signed_out' });
@@ -257,3 +260,99 @@ function saveUser_(me, b) {
 }
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------------- repeat requests (public, called by the request form) ---------------- */
+// The form asks "is there already an OPEN request for this person + store?" before submitting.
+// If yes, the person can still submit; right after, the form calls tagRepeat so the new row gets
+// "Repeat Of" (the original's timestamp + row) and "Repeat Reason". Nothing else is exposed.
+const REPEAT_TABS = { badges: true, shirts: true, cards: true, brinks: true };
+const REPEAT_COLS = ['Repeat Of', 'Repeat Reason'];
+const REPEAT_REASONS = ['Lost', 'Damaged', 'Name change', 'Wrong size', 'Need more', 'Ran out', 'Info changed', 'Locked out', 'More stores', 'Other'];
+const TAG_WINDOW_MIN = 15;
+
+function norm_(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+// Same identity rule for a sheet row (get = header -> value) and for the form's keys.
+function repeatKeyRow_(tab, get) {
+  if (tab === 'badges' || tab === 'shirts') return norm_(get('Store ID')) + '|' + norm_(get('Employee Name'));
+  if (tab === 'cards') return get('Card Type') === 'Store Cards' ? 'store|' + norm_(get('Store ID')) : 'p|' + norm_(get('Full Name')) + '|' + norm_(get('Store ID'));
+  if (tab === 'brinks') return norm_(get('WZ Email')) || 'n|' + norm_(get('First Name') + get('Last Name'));
+  return '';
+}
+function repeatKeyInput_(tab, k) {
+  k = k || {};
+  if (tab === 'badges' || tab === 'shirts') return norm_(k.name) ? norm_(k.storeId) + '|' + norm_(k.name) : '';
+  if (tab === 'cards') {
+    if (k.cardType === 'Store Cards') return norm_(k.storeId) ? 'store|' + norm_(k.storeId) : '';
+    return norm_(k.name) ? 'p|' + norm_(k.name) + '|' + norm_(k.storeId) : '';
+  }
+  if (tab === 'brinks') return norm_(k.email) || (norm_((k.first || '') + (k.last || '')) ? 'n|' + norm_((k.first || '') + (k.last || '')) : '');
+  return '';
+}
+// "4/24/2026, 12:41:16 AM" (how the form writes it) -> Date in the script's time zone
+function parseTs_(t) {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?/i.exec(String(t || '').trim());
+  if (!m) { const d = new Date(t); return isNaN(d) ? new Date(0) : d; }
+  let h = Number(m[4]) % 12; if (m[7] && m[7].toUpperCase() === 'PM') h += 12; if (!m[7]) h = Number(m[4]);
+  const iso = m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2) + ' ' + ('0' + h).slice(-2) + ':' + m[5] + ':' + (m[6] || '00');
+  return Utilities.parseDate(iso, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+}
+function openStatus_(s) { s = String(s || '').trim().toLowerCase(); return !s || s === 'in progress' || s === 'needs info'; }
+
+// All rows on a tab whose identity matches, oldest first: [{row, ts, tsText, status, repeatOf}]
+function repeatMatches_(sh, tab, key) {
+  const v = sh.getDataRange().getValues(), d = sh.getDataRange().getDisplayValues();
+  const H = d[0].map(h => String(h).trim()), at = h => H.indexOf(h);
+  const out = [];
+  for (let i = 1; i < v.length; i++) {
+    if (!v[i][0]) continue;
+    const get = h => { const j = at(h); return j < 0 ? '' : String(d[i][j] || '').trim(); };
+    if (repeatKeyRow_(tab, get) !== key) continue;
+    out.push({ row: i + 1, ts: v[i][0] instanceof Date ? v[i][0] : parseTs_(d[i][0]), tsText: d[i][0], status: get('Status'), repeatOf: get('Repeat Of') });
+  }
+  return out;
+}
+
+function checkRepeat_(b) {
+  const tab = String(b.tab || '');
+  if (!REPEAT_TABS[tab]) return { ok: false, error: 'bad_tab' };
+  const key = repeatKeyInput_(tab, b.keys);
+  if (!key) return { ok: true, repeat: false };
+  const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TABS[tab]);
+  if (!sh) return { ok: true, repeat: false };
+  const open = repeatMatches_(sh, tab, key).filter(m => openStatus_(m.status));
+  if (!open.length) return { ok: true, repeat: false };
+  const first = open[0];
+  return { ok: true, repeat: true, count: open.length,
+    submitted: Utilities.formatDate(first.ts, Session.getScriptTimeZone(), 'MMM d, yyyy'),
+    status: first.status || 'Open' };
+}
+
+function tagRepeat_(b) {
+  const tab = String(b.tab || '');
+  if (!REPEAT_TABS[tab]) return { ok: false, error: 'bad_tab' };
+  const key = repeatKeyInput_(tab, b.keys);
+  if (!key) return { ok: false, error: 'no_key' };
+  const reason = REPEAT_REASONS.indexOf(String(b.reason || '')) >= 0 ? String(b.reason) : 'Not given';
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID), sh = ss.getSheetByName(TABS[tab]);
+    if (!sh) return { ok: false, error: 'no_tab' };
+    let head = ensureCols_(sh);
+    const need = REPEAT_COLS.filter(h => head.indexOf(h) < 0);
+    if (need.length) { sh.getRange(1, head.length + 1, 1, need.length).setValues([need]).setFontWeight('bold'); head = head.concat(need); }
+    const m = repeatMatches_(sh, tab, key);
+    if (m.length < 2) return { ok: false, error: 'no_original' };
+    const fresh = m[m.length - 1];
+    // Only the request that was just submitted can be tagged, and only once.
+    if (fresh.repeatOf || Date.now() - fresh.ts.getTime() > TAG_WINDOW_MIN * 60000) return { ok: false, error: 'not_recent' };
+    const originals = m.slice(0, -1).filter(x => openStatus_(x.status));
+    if (!originals.length) return { ok: false, error: 'no_open_original' };
+    const orig = originals[originals.length - 1];
+    sh.getRange(fresh.row, head.indexOf('Repeat Of') + 1).setValue(orig.tsText + ' (row ' + orig.row + ')');
+    sh.getRange(fresh.row, head.indexOf('Repeat Reason') + 1).setValue(reason);
+    const log = ss.getSheetByName(LOG_TAB);
+    if (log) log.appendRow([new Date(), 'Request form', TABS[tab], fresh.row, 'Repeat of row ' + orig.row, 'Repeat', reason]);
+    return { ok: true };
+  } finally { lock.releaseLock(); }
+}

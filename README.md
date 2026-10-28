@@ -15,6 +15,15 @@ The private work dashboard for the NY Connection **Employee Requests** sheet. It
 | Handled By | Name from the Users tab |
 | Updated At | Time of the last change |
 | Team Notes | Tracking #, what's missing, and so on |
+| Repeat Of | Set by the request form when someone submits again while an earlier request is still open: the original's timestamp and row |
+| Repeat Reason | Lost · Damaged · Name change · … or Not given |
+
+## Repeat requests
+
+Badges, Apparel, Business Cards and Brinks are checked before they're submitted. The form calls two
+public actions on this API: `checkRepeat` (returns only yes/no, the date and status of the open request)
+and `tagRepeat` (writes Repeat Of / Repeat Reason on the row that was just submitted, within 15 minutes,
+once). People can always submit; the dashboard shows a **Repeat** pill so the team fills one and closes the other.
 
 The **Activity Log** tab records every change as a row: time, who, which queue, which row, what changed.
 
